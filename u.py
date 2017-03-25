@@ -1,5 +1,9 @@
 #!/usr/bin/python
 
+#
+# V 0.4 - 25/3/17
+#
+
 from ConfigParser import SafeConfigParser
 from pprint import pprint
 import ast
@@ -29,8 +33,8 @@ def log(log_ln):
     os.fsync(log_f.fileno())
 
 def config_error(parm, val, config_section, err_text):
-    log("Error in configuration file section %s - the value '%s' for '%s' %s" % (config_section, val, parm, err_text)
-     sys.exit(2)
+    log("Error in configuration file section %s - the value '%s' for '%s' %s" % (config_section, val, parm, err_text))
+    sys.exit(2)
 
 def run_section(section):
     log_file = 'url_diff.log'
@@ -53,15 +57,15 @@ def run_section(section):
         cmd = cmd + '--proxy=' + config[section]['proxy_server'] + ' '
     if config[section]['proxy_username'] != '' and config[section]['proxy_password'] != '':
         cmd = cmd + '--proxy-auth=' + config[section]['proxy_username'] + ':' + config[section]['proxy_password'] + ' '
-    if config[section]['ignore_ssl_errors'] != '':
-        cmd = cmd + '--ignore-ssl-errors=' + config[section]['ignore_ssl_errors'] + ' '
+    if config[section]['ignore_ssl_errors']:
+        cmd = cmd + '--ignore-ssl-errors=true '
     if config[section]['cookies_file'] != '':
         cmd = cmd + '--cookies-file=' + config[section]['cookies_file'] + ' '
     cmd = cmd + 'screenshot.js '
     cmd = cmd + "'" + config[section]['url'] + "' "
     cmd = cmd + section + '.png '
-    cmd = cmd + config[section]['screen_width'] + ' '
-    cmd = cmd + config[section]['screen_height'] + ' '
+    cmd = cmd + str(config[section]['screen_width']) + ' '
+    cmd = cmd + str(config[section]['screen_height']) + ' '
     if config[section]['user_agent'] != '':
         cmd = cmd + "'" + config[section]['user_agent'] + "' "
     if config[section]['http_username'] != '':
@@ -81,7 +85,7 @@ def run_section(section):
     if os.path.isfile(section + '-previous.png'):
         cmd = "compare -verbose -metric AE " 
         if (config[section]['compare_fuzz'] != '0'):
-            cmd = cmd + "-fuzz '" + config[section]['compare_fuzz'] + "%' "
+            cmd = cmd + "-fuzz '" + str(config[section]['compare_fuzz']) + "%' "
         if (config[section]['diff_highlight'] != ''):
             cmd = cmd + "-highlight-color '" + config[section]['diff_highlight'] + "' "
         if (config[section]['diff_lowlight'] != ''):
@@ -135,6 +139,10 @@ def run_section(section):
             cmd = "convert %s-delta.png -resize %s %s-delta-thumbnail.png" % (section, config[section]['thumbnail_width'], section)
             proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
+            if config[section]['email_to'] == '':
+                log("Not emailing differences email_to is blank")
+                return
+
             log("Emailing differences")
 
             mail_to = config[section]['email_from']
@@ -155,7 +163,7 @@ def run_section(section):
             msg.epilogue = ''
 
             text = "A %p% change has been detected in site %s (%u).\n\nThe current, previous, and difference images are attached."
-            html = "A <strong>%p%</strong> change has been detected in site <strong>%s</strong> (%u).<br /><br />Thumbnails of the current, previous, and difference images are shown below".
+            html = "A <strong>%p%</strong> change has been detected in site <strong>%s</strong> (%u).<br /><br />Thumbnails of the current, previous, and difference images are shown below"
             if (config[section]['attach_fullsize']):
                 html = html + " - and the full images are attached."
             html = html + "<br /><br /><strong>Current image</strong><br /><img src=\"cid:imgcurr\"><br /><br /><strong>Previous image</strong><br /><img src=\"cid:imgprev\"><br /><br /><strong>Difference</strong><br /><img src=\"cid:imgdelta\"><br />"
@@ -195,36 +203,6 @@ def run_section(section):
             s.quit()
             return None
 
-            msg = MIMEMultipart()
-            msg["To"] = mail_to
-            msg["From"] = mail_from
-            msg["Subject"] = mail_subject
-
-            body = "Whoo"
-            attachment = "%s-thumbnail.png" % (section)
-            msgText = MIMEText('<b>%s</b><br><img src="cid:%s"><br>' % (body, attachment), 'html')  
-            msg.attach(msgText)
-
-            fp = open(attachment, 'rb')                                                    
-            img = MIMEImage(fp.read())
-            fp.close()
-            img.add_header('Content-ID', '<{}>'.format(attachment))
-            msg.attach(img)
- 
-            # email_message = '%s\n%s\n%s' % (subject, body, img)
-            email_message = '%s\n%s' % (mail_subject, body)
-   
-            mail_server = 'auth.smtp.1and1.co.uk'
-            mail_server_port = 25
-            mail_username = 'ian@planetbuilders.co.uk'
-            mail_password = '0Magrathea'
-
-            emailRezi = smtplib.SMTP(mail_server, mail_server_port)
-            emailRezi.set_debuglevel(1)
-            emailRezi.login(mail_username, mail_password)
-            emailRezi.sendmail(mail_from, mail_to, email_message)
-            #emailRezi.sendmail(from_addr, to_addr, msg.as_string())
-            emailRezi.quit()
 
 #
 # Start
@@ -250,7 +228,7 @@ for config_section in config_sections:
                 v = v[1:]
             if v[-1] in [ '"', "'" ]:
                 v = v[:-1]
-        v = v.strip()
+            v = v.strip()
         config[config_section][k] = v
 
 # Apply defaults to all sections
@@ -266,6 +244,7 @@ for config_section in config_sections:
     for parm in config_parms:
         val = config[config_section][parm]
         if parm == 'proxy_server':
+            pass
         elif parm == 'proxy_username':
             pass
         elif parm == 'proxy_password':
@@ -279,52 +258,57 @@ for config_section in config_sections:
         elif parm == 'ignore_ssl_errors':
             if val in [ '1', 'True', 'true', 'TRUE' ]:
                config[config_section][parm] = True
-            elif  val in [ '0', 'False', 'false', 'FALSE' ]:
+            elif val in [ '0', 'False', 'false', 'FALSE' ]:
                config[config_section][parm] = False
             else:
                config_error(parm, val, config_section, 'must be "true" or "false"')
         elif parm == 'extra_headers':
-# Fixme
             pass
         elif parm == 'user_agent':
             pass
-# Fixme
         elif parm == 'cookies_file':
             pass
-# Fixme
         elif parm == 'screen_width':
-            pass
-# Fixme
+            if val.isdigit():
+                config[config_section][parm] = int(val)
+            else:
+                config_error(parm, val, config_section, 'must be a positive integer')
         elif parm == 'screen_height':
-            pass
+            if val.isdigit():
+                config[config_section][parm] = int(val)
+            else:
+                config_error(parm, val, config_section, 'must be a positive integer')
         elif parm == 'http_username':
             pass
         elif parm == 'http_password':
             pass
-# Fixme
         elif parm == 'compare_fuzz':
-            pass
-# Fixme
+            if val.isdigit():
+                config[config_section][parm] = int(val)
+            else:
+                config_error(parm, val, config_section, 'must be a positive integer')
         elif parm == 'diff_threshold':
-            pass
-# Fixme
+            if val.isdigit():
+                config[config_section][parm] = int(val)
+            else:
+                config_error(parm, val, config_section, 'must be a positive integer')
         elif parm == 'diff_highlight':
             pass
-# Fixme
         elif parm == 'diff_lowlight':
             pass
-# Fixme
         elif parm == 'thumbnail_width':
-            pass
-# Fixme
+            if val.isdigit():
+                config[config_section][parm] = int(val)
+            else:
+                config_error(parm, val, config_section, 'must be a positive integer')
         elif parm == 'email_from':
-            pass
-# Fixme
+            if val == '':
+                config_error(parm, val, config_section, 'must not be blank')
         elif parm == 'email_to':
             pass
-# Fixme
         elif parm == 'email_subject':
-            pass
+            if val == '':
+                config_error(parm, val, config_section, 'must not be blank')
 # Fixme
         elif parm == 'include_area':
             pass
@@ -332,9 +316,9 @@ for config_section in config_sections:
         elif parm == 'exclude_areas':
             pass
         elif parm == 'attach_fullsize':
-             if val in [ '1', 'True', 'true', 'TRUE' ]:
+            if val in [ '1', 'True', 'true', 'TRUE' ]:
                config[config_section][parm] = True
-            elif  val in [ '0', 'False', 'false', 'FALSE' ]:
+            elif val in [ '0', 'False', 'false', 'FALSE' ]:
                config[config_section][parm] = False
             else:
                config_error(parm, val, config_section, 'must be "true" or "false"')

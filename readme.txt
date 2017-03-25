@@ -1,8 +1,6 @@
 - Allow html and text of messages in config
-- Check http auth
 - Allow specification of an area to include
 - Allow specification of a list of areas of exclude. Can't use with above of course
-- Don't process a section if there is no URL
 - Implement extra_headers
 
 
