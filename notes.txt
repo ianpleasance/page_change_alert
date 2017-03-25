@@ -1,0 +1,129 @@
+http://phantomjs.org/api/webpage/property/settings.html
+
+
+settings {object}
+
+This property stores various settings of the web page:
+
+javascriptEnabled defines whether to execute the script in the page or not (defaults to true).
+loadImages defines whether to load the inlined images or not (defaults to true).
+localToRemoteUrlAccessEnabled defines whether local resource (e.g. from file) can access remote URLs or not (defaults to false).
+userAgent defines the user agent sent to server when the web page requests resources.
+userName sets the user name used for HTTP authentication.
+password sets the password used for HTTP authentication.
+XSSAuditingEnabled defines whether load requests should be monitored for cross-site scripting attempts (defaults to false).
+webSecurityEnabled defines whether web security should be enabled or not (defaults to true).
+resourceTimeout (in milli-secs) defines the timeout after which any resource requested will stop trying and proceed with other parts of the page. onResourceTimeout callback will be called on timeout.
+Note: The settings apply only during the initial call to the page.open function. Subsequent modification of the settings object will not have any impact.
+
+
+
+viewportSize {object}
+
+This property sets the size of the viewport for the layout process. It is useful to set the preferred initial size before loading the page, e.g. to choose between 'landscape' vs 'portrait'.
+
+Because PhantomJS is headless (nothing is shown), viewportSize effectively simulates the size of the window like in a traditional browser.
+
+Examples
+
+var webPage = require('webpage');
+var page = webPage.create();
+
+page.viewportSize = {
+  width: 480,
+  height: 800
+};
+
+
+
+
+Get or set Cookies visible to the current URL (though, for setting, use of page.addCookie is preferred). This array will be pre-populated by any existing Cookie data visible to this URL that is stored in the CookieJar, if any.
+
+Cookies is an array of objects:
+
+{ 
+  domain: 'example.com',
+  expires: 'Sat Oct 11 2014 21:44:33 GMT+0200 (CEST)',
+  expiry: 1476128618,
+  httponly: false,
+  name: 'cookieName',
+  path: '/',
+  secure: false,
+  value: cookieValue
+}
+Examples
+
+var webPage = require('webpage');
+var page = webPage.create();
+
+page.open('http://phantomjs.org', function (status) {
+  var cookies = page.cookies;
+  
+  console.log('Listing cookies:');
+  for(var i in cookies) {
+    console.log(cookies[i].name + '=' + cookies[i].value);
+  }
+  
+  phantom.exit();
+});
+
+
+
+
+content {string}
+
+This property stores the content of the web page (main frame), enclosed in an HTML/XML element. Setting the property will effectively reload the web page with the new content.
+
+See also page.plainText to get the content without any HTML tags.
+
+Examples
+
+var webPage = require('webpage');
+var page = webPage.create();
+
+page.open('http://phantomjs.org', function (status) {
+  var content = page.content;
+  console.log('Content: ' + content);
+  phantom.exit();
+});
+
+
+
+
+customHeaders {object}
+
+Introduced: PhantomJS 1.5
+
+This property specifies additional HTTP request headers that will be sent to the server for every request issued (for pages and resources). The default value is an empty object {}. Headers names and values get encoded in US-ASCII before being sent. Please note that the ‘User-Agent’ should be set using the page.settings, setting the ‘User-Agent’ property in this property will overwrite the value set via page.settings.
+
+Examples
+
+Send two additional headers ‘X-Test’ and ‘DNT’
+
+var webPage = require('webpage');
+var page = webPage.create();
+
+page.customHeaders = {
+  "X-Test": "foo",
+  "DNT": "1"
+};
+Do you only want these customHeaders passed to the initial page.open request?
+
+Here’s the recommended workaround:
+
+var webPage = require('webpage');
+var page = webPage.create();
+
+page.customHeaders = {
+  "X-Test": "foo",
+  "DNT": "1"
+};
+
+page.onInitialized = function() {
+  page.customHeaders = {};
+};
+
+
+
+
+

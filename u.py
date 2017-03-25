@@ -1,0 +1,350 @@
+#!/usr/bin/python
+
+from ConfigParser import SafeConfigParser
+from pprint import pprint
+import ast
+import re
+import sys, os, subprocess
+import time
+
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText  # Added
+from email.mime.image import MIMEImage
+import smtplib
+
+config_file = 'url_diff.ini'
+log_file = 'url_diff.log'
+config_parms = { 'proxy_server': '', 'proxy_username': '', 'proxy_password': '', 'proxy_type': 'http',
+    'ssl_protocol': 'any', 'ignore_ssl_errors': True, 'extra_headers': [ ], 'user_agent': '', 'cookies_file': '',
+    'screen_width': 1280, 'screen_height': 1024,
+    'http_username': '', 'http_password': '', 'compare_fuzz': 0, 'diff_threshold': 0, 'diff_highlight': '', 'diff_lowlight': '',
+    'thumbnail_width': 600, 'email_from': '', 'email_to': '', 'email_subject': '', 'attach_fullsize': True }
+
+def log(log_ln):
+    now_time = time.strftime("%d/%m/%Y %H:%M:%S")
+    log_f = open(log_file, 'a')
+    print "%s %s" % (now_time, log_ln)
+    log_f.write("%s %s\n" % (now_time, log_ln))
+    log_f.flush()
+    os.fsync(log_f.fileno())
+
+def config_error(parm, val, config_section, err_text):
+    log("Error in configuration file section %s - the value '%s' for '%s' %s" % (config_section, val, parm, err_text)
+     sys.exit(2)
+
+def run_section(section):
+    log_file = 'url_diff.log'
+
+    if config[section]['url'] == '':
+        log("Ignoring section %s as it has no url defined" % (section))
+        return
+
+    log("Processing section %s" % (section))
+
+    if os.path.isfile(section + '.png'):
+        log("Renaming %s.png %s-previous.png" % (section, section))
+        os.rename(section + '.png', section + '-previous.png')
+
+# Grab screen
+    cmd = "phantomjs "
+    if config[section]['ssl_protocol'] != '':
+        cmd = cmd + '--ssl-protocol=' + config[section]['ssl_protocol'] + ' '
+    if config[section]['proxy_server'] != '':
+        cmd = cmd + '--proxy=' + config[section]['proxy_server'] + ' '
+    if config[section]['proxy_username'] != '' and config[section]['proxy_password'] != '':
+        cmd = cmd + '--proxy-auth=' + config[section]['proxy_username'] + ':' + config[section]['proxy_password'] + ' '
+    if config[section]['ignore_ssl_errors'] != '':
+        cmd = cmd + '--ignore-ssl-errors=' + config[section]['ignore_ssl_errors'] + ' '
+    if config[section]['cookies_file'] != '':
+        cmd = cmd + '--cookies-file=' + config[section]['cookies_file'] + ' '
+    cmd = cmd + 'screenshot.js '
+    cmd = cmd + "'" + config[section]['url'] + "' "
+    cmd = cmd + section + '.png '
+    cmd = cmd + config[section]['screen_width'] + ' '
+    cmd = cmd + config[section]['screen_height'] + ' '
+    if config[section]['user_agent'] != '':
+        cmd = cmd + "'" + config[section]['user_agent'] + "' "
+    if config[section]['http_username'] != '':
+        cmd = cmd + "'" + config[section]['http_username'] + "' "
+    if config[section]['http_password'] != '':
+        cmd = cmd + "'" + config[section]['http_password'] + "' "
+    log("Executing phantomjs: %s" % (cmd))
+    proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    remainder = proc.communicate()[0]
+    remainder_rc = proc.returncode
+    log("Return code %s" % (remainder_rc))
+    for remainder_ln in remainder.split("\n"):
+        remainder_ln = remainder_ln.rstrip('\r\n')
+        log("Output: %s" % (remainder_ln))
+
+# Compare with previous
+    if os.path.isfile(section + '-previous.png'):
+        cmd = "compare -verbose -metric AE " 
+        if (config[section]['compare_fuzz'] != '0'):
+            cmd = cmd + "-fuzz '" + config[section]['compare_fuzz'] + "%' "
+        if (config[section]['diff_highlight'] != ''):
+            cmd = cmd + "-highlight-color '" + config[section]['diff_highlight'] + "' "
+        if (config[section]['diff_lowlight'] != ''):
+            cmd = cmd + "-lowlight-color '" + config[section]['diff_lowlight'] + "' "
+
+        cmd = cmd + "%s.png %s-previous.png %s-delta.png" % (section, section, section)
+        log("Executing compare: %s" % (cmd))
+        proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        remainder = proc.communicate()[0]
+        remainder_rc = proc.returncode
+        log("Return code %s" % (remainder_rc))
+        percentage_difference = -1
+        pixel_difference = -1
+        curr_w = -1
+        curr_h = -1 
+        prev_w = -1
+        prev_h = -1
+        for remainder_ln in remainder.split("\n"):
+            remainder_ln = remainder_ln.rstrip('\r\n')
+            log("Output: %s" % (remainder_ln))
+#           if remainder_ln.isdigit():
+#               percentage_difference = remainder_ln
+#bbc.png PNG 1280x3000 1280x3000+0+0 8-bit DirectClass 1.963MB 0.110u 0:00.120
+            match = re.search(section+'\.png PNG ([0-9]*)x([0-9]*) ', remainder_ln)
+            if match:
+                curr_w = int(match.group(1))
+                curr_h = int(match.group(2))
+            match = re.search(section+'-previous\.png PNG ([0-9]*)x([0-9]*) ', remainder_ln)
+            if match:
+                prev_w = int(match.group(1))
+                prev_h = int(match.group(2))
+# all: 967
+            match = re.search('all: ([0-9]*)', remainder_ln)
+            if match:
+                pixel_difference = int(match.group(1))
+        if pixel_difference == 0:
+            percentage_difference = 0
+        else:
+            percentage_difference = (float(pixel_difference) / float(curr_w * curr_h)) * 100.0
+            percentage_difference = int(round(percentage_difference))
+        log("Current image = %s x %s, previous image = %s x %s" % (curr_w, curr_h, prev_w, prev_h))
+        log("Pixel/Percentage difference: %s %s" % (pixel_difference, percentage_difference))
+
+# Email differences
+        if percentage_difference > int(config[section]['diff_threshold']):
+            log("Thumbnailing")
+            cmd = "convert %s.png -resize %s %s-thumbnail.png" % (section, config[section]['thumbnail_width'], section)
+            proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            cmd = "convert %s-previous.png -resize %s %s-previous-thumbnail.png" % (section, config[section]['thumbnail_width'], section)
+            proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            cmd = "convert %s-delta.png -resize %s %s-delta-thumbnail.png" % (section, config[section]['thumbnail_width'], section)
+            proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+            log("Emailing differences")
+
+            mail_to = config[section]['email_from']
+            mail_from = config[section]['email_to']
+            mail_subject = config[section]['email_subject']
+
+            mail_subject = mail_subject.replace('%s', section)
+            mail_subject = mail_subject.replace('%u', config[section]['url'])
+            mail_subject = mail_subject.replace('%p', str(percentage_difference))
+
+# Create the container (outer) email message.
+            msg = MIMEMultipart()
+            msg['Subject'] = mail_subject
+            msg['From'] = mail_from
+            msg['To'] = mail_to
+
+            msg.preamble = 'This is a multi-part message in MIME format.\n'
+            msg.epilogue = ''
+
+            text = "A %p% change has been detected in site %s (%u).\n\nThe current, previous, and difference images are attached."
+            html = "A <strong>%p%</strong> change has been detected in site <strong>%s</strong> (%u).<br /><br />Thumbnails of the current, previous, and difference images are shown below".
+            if (config[section]['attach_fullsize']):
+                html = html + " - and the full images are attached."
+            html = html + "<br /><br /><strong>Current image</strong><br /><img src=\"cid:imgcurr\"><br /><br /><strong>Previous image</strong><br /><img src=\"cid:imgprev\"><br /><br /><strong>Difference</strong><br /><img src=\"cid:imgdelta\"><br />"
+
+            text = text.replace('%s', section)
+            text = text.replace('%u', config[section]['url'])
+            text = text.replace('%p', str(percentage_difference))
+            html = html.replace('%s', section)
+            html = html.replace('%u', config[section]['url'])
+            html = html.replace('%p', str(percentage_difference))
+            
+            body = MIMEMultipart('alternative')
+            body.attach(MIMEText(text))
+            body.attach(MIMEText(html, 'html'))
+
+            msg.attach(body)
+
+            for (name, file) in { 'imgcurr': section+'-thumbnail.png', 'imgprev': section+'-previous-thumbnail.png', 'imgdelta': section+'-delta-thumbnail.png' }.items():
+                fp = open(file, 'rb')
+                msgImage = MIMEImage(fp.read())
+                fp.close()
+                # Define the image's ID as referenced above
+                msg.add_header('Content-ID', '<'+name+'>')
+                msgImage['Content-ID'] = '<' + name + '>'
+                msgImage['Content-Disposition'] = 'filename="%s"' % (file)
+                msg.attach(msgImage)
+
+            for file in [ section+'.png', section+'-previous.png', section+'-delta.png' ]:
+                with open(file, 'rb') as fp:
+                    img = MIMEImage(fp.read())
+                img['Content-Disposition'] = 'attachment; filename="%s"' % (file)
+                msg.attach(img)
+
+# Send the email via our own SMTP server.
+            s = smtplib.SMTP('localhost')
+            s.sendmail(mail_from, mail_to, msg.as_string())
+            s.quit()
+            return None
+
+            msg = MIMEMultipart()
+            msg["To"] = mail_to
+            msg["From"] = mail_from
+            msg["Subject"] = mail_subject
+
+            body = "Whoo"
+            attachment = "%s-thumbnail.png" % (section)
+            msgText = MIMEText('<b>%s</b><br><img src="cid:%s"><br>' % (body, attachment), 'html')  
+            msg.attach(msgText)
+
+            fp = open(attachment, 'rb')                                                    
+            img = MIMEImage(fp.read())
+            fp.close()
+            img.add_header('Content-ID', '<{}>'.format(attachment))
+            msg.attach(img)
+ 
+            # email_message = '%s\n%s\n%s' % (subject, body, img)
+            email_message = '%s\n%s' % (mail_subject, body)
+   
+            mail_server = 'auth.smtp.1and1.co.uk'
+            mail_server_port = 25
+            mail_username = 'ian@planetbuilders.co.uk'
+            mail_password = '0Magrathea'
+
+            emailRezi = smtplib.SMTP(mail_server, mail_server_port)
+            emailRezi.set_debuglevel(1)
+            emailRezi.login(mail_username, mail_password)
+            emailRezi.sendmail(mail_from, mail_to, email_message)
+            #emailRezi.sendmail(from_addr, to_addr, msg.as_string())
+            emailRezi.quit()
+
+#
+# Start
+#
+
+# Apply standard defaults just in case there is no 'defaults' section in the config file
+config = {} 
+config['defaults'] = {}
+for (k, v) in config_parms.items():
+    config['defaults'][k] = v
+
+# Parse configuration
+config_parser = SafeConfigParser()
+config_parser.read(config_file)
+config_sections = config_parser.sections()
+for config_section in config_sections:
+    config[config_section] = {}
+    for (k, v) in config_parser.items(config_section):
+        if v.find('[') > -1:
+            v = ast.literal_eval(v)
+        elif len(v) > 0:
+            if v[0] in [ '"', "'" ]:
+                v = v[1:]
+            if v[-1] in [ '"', "'" ]:
+                v = v[:-1]
+        v = v.strip()
+        config[config_section][k] = v
+
+# Apply defaults to all sections
+if 'defaults' in config.keys():
+    for config_section in config_sections:
+        if config_section != 'defaults':
+            for key in config_parms:
+                if key not in config[config_section].keys():
+                    config[config_section][key] = config['defaults'][key]
+
+# Validate each section
+for config_section in config_sections:
+    for parm in config_parms:
+        val = config[config_section][parm]
+        if parm == 'proxy_server':
+        elif parm == 'proxy_username':
+            pass
+        elif parm == 'proxy_password':
+            pass
+        elif parm == 'proxy_type':
+            if val not in ['http', 'https']:
+                config_error(parm, val, config_section, 'must be "http" or "https"')
+        elif parm == 'ssl_protocol':
+            if val not in ['SSLv3', 'SSLv2', 'TLSv1', 'any']:
+                config_error(parm, val, config_section, 'must be "SSLvs", "SSLv2", "TLSv1" or "any"')
+        elif parm == 'ignore_ssl_errors':
+            if val in [ '1', 'True', 'true', 'TRUE' ]:
+               config[config_section][parm] = True
+            elif  val in [ '0', 'False', 'false', 'FALSE' ]:
+               config[config_section][parm] = False
+            else:
+               config_error(parm, val, config_section, 'must be "true" or "false"')
+        elif parm == 'extra_headers':
+# Fixme
+            pass
+        elif parm == 'user_agent':
+            pass
+# Fixme
+        elif parm == 'cookies_file':
+            pass
+# Fixme
+        elif parm == 'screen_width':
+            pass
+# Fixme
+        elif parm == 'screen_height':
+            pass
+        elif parm == 'http_username':
+            pass
+        elif parm == 'http_password':
+            pass
+# Fixme
+        elif parm == 'compare_fuzz':
+            pass
+# Fixme
+        elif parm == 'diff_threshold':
+            pass
+# Fixme
+        elif parm == 'diff_highlight':
+            pass
+# Fixme
+        elif parm == 'diff_lowlight':
+            pass
+# Fixme
+        elif parm == 'thumbnail_width':
+            pass
+# Fixme
+        elif parm == 'email_from':
+            pass
+# Fixme
+        elif parm == 'email_to':
+            pass
+# Fixme
+        elif parm == 'email_subject':
+            pass
+# Fixme
+        elif parm == 'include_area':
+            pass
+# Fixme
+        elif parm == 'exclude_areas':
+            pass
+        elif parm == 'attach_fullsize':
+             if val in [ '1', 'True', 'true', 'TRUE' ]:
+               config[config_section][parm] = True
+            elif  val in [ '0', 'False', 'false', 'FALSE' ]:
+               config[config_section][parm] = False
+            else:
+               config_error(parm, val, config_section, 'must be "true" or "false"')
+
+# Process each config file section
+for config_section in config_sections:
+    if config_section != 'defaults':
+        run_section(config_section)
+
+sys.exit(0)
+
+# End
+
