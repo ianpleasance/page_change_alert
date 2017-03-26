@@ -263,7 +263,8 @@ for config_section in config_sections:
             else:
                config_error(parm, val, config_section, 'must be "true" or "false"')
         elif parm == 'extra_headers':
-            pass
+            if type(v) == 'str':
+                v = [ v ]
         elif parm == 'user_agent':
             pass
         elif parm == 'cookies_file':
@@ -309,11 +310,16 @@ for config_section in config_sections:
         elif parm == 'email_subject':
             if val == '':
                 config_error(parm, val, config_section, 'must not be blank')
-# Fixme
         elif parm == 'include_area':
-            pass
-# Fixme
+            if type(v) != 'list':
+                config_error(parm, val, config_section, 'must be a list with 4 elements')
+            if len(v) != 4:
+                config_error(parm, val, config_section, 'must be a list with 4 elements')
         elif parm == 'exclude_areas':
+            if type(v) != 'list':
+                config_error(parm, val, config_section, 'must be a list with 4 elements')
+            if (len(v) % 4) > 0:
+                config_error(parm, val, config_section, 'must be a list with 4 elements per area')
             pass
         elif parm == 'attach_fullsize':
             if val in [ '1', 'True', 'true', 'TRUE' ]:
