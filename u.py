@@ -66,12 +66,14 @@ def run_section(section):
     cmd = cmd + section + '.png '
     cmd = cmd + str(config[section]['screen_width']) + ' '
     cmd = cmd + str(config[section]['screen_height']) + ' '
-    if config[section]['user_agent'] != '':
-        cmd = cmd + "'" + config[section]['user_agent'] + "' "
-    if config[section]['http_username'] != '':
-        cmd = cmd + "'" + config[section]['http_username'] + "' "
-    if config[section]['http_password'] != '':
-        cmd = cmd + "'" + config[section]['http_password'] + "' "
+#   if config[section]['user_agent'] != '':
+    cmd = cmd + "'" + config[section]['user_agent'] + "' "
+#   if config[section]['http_username'] != '':
+    cmd = cmd + "'" + config[section]['http_username'] + "' "
+#   if config[section]['http_password'] != '':
+    cmd = cmd + "'" + config[section]['http_password'] + "' "
+    cmd = cmd + "'" + ','.join(config[section]['extra_headers']) + "'"
+
     log("Executing phantomjs: %s" % (cmd))
     proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     remainder = proc.communicate()[0]
