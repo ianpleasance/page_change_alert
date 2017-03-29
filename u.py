@@ -2,6 +2,7 @@
 
 #
 # V 0.4 - 25/3/17
+# V 0.5 - 28/3/17
 #
 
 from ConfigParser import SafeConfigParser
@@ -15,6 +16,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText  # Added
 from email.mime.image import MIMEImage
 import smtplib
+import shutil
 
 config_file = 'url_diff.ini'
 log_file = 'url_diff.log'
@@ -22,7 +24,8 @@ config_parms = { 'proxy_server': '', 'proxy_username': '', 'proxy_password': '',
     'ssl_protocol': 'any', 'ignore_ssl_errors': True, 'extra_headers': [ ], 'user_agent': '', 'cookies_file': '',
     'screen_width': 1280, 'screen_height': 1024,
     'http_username': '', 'http_password': '', 'compare_fuzz': 0, 'diff_threshold': 0, 'diff_highlight': '', 'diff_lowlight': '',
-    'thumbnail_width': 600, 'email_from': '', 'email_to': '', 'email_subject': '', 'attach_fullsize': True }
+    'thumbnail_width': 600, 'email_from': '', 'email_to': '', 'email_subject': '', 'attach_fullsize': True,
+    'include_area': [], 'exclude_areas': []}
 
 def log(log_ln):
     now_time = time.strftime("%d/%m/%Y %H:%M:%S")
@@ -31,6 +34,10 @@ def log(log_ln):
     log_f.write("%s %s\n" % (now_time, log_ln))
     log_f.flush()
     os.fsync(log_f.fileno())
+
+def abort(err_ln):
+    print(err_ln)
+    sys.exit(2)
 
 def config_error(parm, val, config_section, err_text):
     log("Error in configuration file section %s - the value '%s' for '%s' %s" % (config_section, val, parm, err_text))
@@ -83,6 +90,51 @@ def run_section(section):
         remainder_ln = remainder_ln.rstrip('\r\n')
         log("Output: %s" % (remainder_ln))
 
+    if not os.path.isfile(section + '-previous.png'):
+        log("This is the first run for this section, so not doing comparison")
+        return
+
+# Do include/exclude processing
+    if len(config[section]['include_area']) != 0:
+        # Include area
+        i = config[section]['include_area']
+        cmd = "convert %s.png -crop %sx%s+%s+%s %s-compare.png" % (section, i[0], i[1], i[2], i[3], section)
+        log(cmd)
+        proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        remainder = proc.communicate()[0]
+        remainder_rc = proc.returncode
+        time.sleep(3)
+        cmd = "convert %s-previous.png -crop %sx%s+%s+%s %s-previous-compare.png" % (section, i[0], i[1], i[2], i[3], section)
+        log(cmd)
+        proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        remainder = proc.communicate()[0]
+        remainder_rc = proc.returncode
+        time.sleep(3)
+    elif (len(config[section]['exclude_areas']) != 0):
+        # Exclude areas
+        i = config[section]['exclude_areas']
+        draws = ''
+        fill_colour = 'black'
+        for n in range(0, len(i) // 4):
+           p = (n * 4)
+           draws = draws + '-draw "rectangle %s,%s %s,%s" ' % (i[p], i[p+1], i[p+2], i[p+3])
+        cmd = "convert %s.png -fill %s %s %s-compare.png" % (section, fill_colour, draws, section)
+        log(cmd)
+        proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        remainder = proc.communicate()[0]
+        remainder_rc = proc.returncode
+        time.sleep(3)
+        cmd = "convert %s-previous.png -fill %s %s %s-previous-compare.png" % (section, fill_colour, draws, section)
+        log(cmd)
+        proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        remainder = proc.communicate()[0]
+        remainder_rc = proc.returncode
+        time.sleep(3)
+    else:
+        # Just make a copy
+        shutil.copyfile(section+'-previous.png', section+'-previous-compare.png')
+        shutil.copyfile(section+'.png', section+'-compare.png')
+
 # Compare with previous
     if os.path.isfile(section + '-previous.png'):
         cmd = "compare -verbose -metric AE " 
@@ -93,7 +145,7 @@ def run_section(section):
         if (config[section]['diff_lowlight'] != ''):
             cmd = cmd + "-lowlight-color '" + config[section]['diff_lowlight'] + "' "
 
-        cmd = cmd + "%s.png %s-previous.png %s-delta.png" % (section, section, section)
+        cmd = cmd + "%s-compare.png %s-previous-compare.png %s-delta.png" % (section, section, section)
         log("Executing compare: %s" % (cmd))
         proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         remainder = proc.communicate()[0]
@@ -111,11 +163,11 @@ def run_section(section):
 #           if remainder_ln.isdigit():
 #               percentage_difference = remainder_ln
 #bbc.png PNG 1280x3000 1280x3000+0+0 8-bit DirectClass 1.963MB 0.110u 0:00.120
-            match = re.search(section+'\.png PNG ([0-9]*)x([0-9]*) ', remainder_ln)
+            match = re.search(section+'-compare\.png PNG ([0-9]*)x([0-9]*) ', remainder_ln)
             if match:
                 curr_w = int(match.group(1))
                 curr_h = int(match.group(2))
-            match = re.search(section+'-previous\.png PNG ([0-9]*)x([0-9]*) ', remainder_ln)
+            match = re.search(section+'-previous-compare\.png PNG ([0-9]*)x([0-9]*) ', remainder_ln)
             if match:
                 prev_w = int(match.group(1))
                 prev_h = int(match.group(2))
@@ -123,6 +175,16 @@ def run_section(section):
             match = re.search('all: ([0-9]*)', remainder_ln)
             if match:
                 pixel_difference = int(match.group(1))
+        if (curr_w == -1):
+            abort("Can't extract current width")
+        if (curr_h == -1):
+            abort("Can't extract current height")
+        if (prev_w == -1):
+            abort("Can't extract previous width")
+        if (prev_h == -1):
+            abort("Can't extract previous height")
+        if (pixel_difference == -1):
+            abort("Can't extract pixel difference")
         if pixel_difference == 0:
             percentage_difference = 0
         else:
@@ -135,11 +197,23 @@ def run_section(section):
         if percentage_difference > int(config[section]['diff_threshold']):
             log("Thumbnailing")
             cmd = "convert %s.png -resize %s %s-thumbnail.png" % (section, config[section]['thumbnail_width'], section)
+            log(cmd)
             proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            remainder = proc.communicate()[0]
+            remainder_rc = proc.returncode
+            time.sleep(3)
             cmd = "convert %s-previous.png -resize %s %s-previous-thumbnail.png" % (section, config[section]['thumbnail_width'], section)
+            log(cmd)
             proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            remainder = proc.communicate()[0]
+            remainder_rc = proc.returncode
+            time.sleep(3)
             cmd = "convert %s-delta.png -resize %s %s-delta-thumbnail.png" % (section, config[section]['thumbnail_width'], section)
+            log(cmd)
             proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            remainder = proc.communicate()[0]
+            remainder_rc = proc.returncode
+            time.sleep(3)
 
             if config[section]['email_to'] == '':
                 log("Not emailing differences email_to is blank")
@@ -223,6 +297,7 @@ config_sections = config_parser.sections()
 for config_section in config_sections:
     config[config_section] = {}
     for (k, v) in config_parser.items(config_section):
+        # print "k v type %s %s %s" % (k,v, type(v))
         if v.find('[') > -1:
             v = ast.literal_eval(v)
         elif len(v) > 0:
@@ -265,8 +340,8 @@ for config_section in config_sections:
             else:
                config_error(parm, val, config_section, 'must be "true" or "false"')
         elif parm == 'extra_headers':
-            if type(v) == 'str':
-                v = [ v ]
+            if type(val) is str:
+                val = [ val ]
         elif parm == 'user_agent':
             pass
         elif parm == 'cookies_file':
@@ -313,14 +388,18 @@ for config_section in config_sections:
             if val == '':
                 config_error(parm, val, config_section, 'must not be blank')
         elif parm == 'include_area':
-            if type(v) != 'list':
+            if type(val) is str:
+                val = [ val ]
+            elif type(val) is not list:
                 config_error(parm, val, config_section, 'must be a list with 4 elements')
-            if len(v) != 4:
+            elif len(val) != 4:
                 config_error(parm, val, config_section, 'must be a list with 4 elements')
         elif parm == 'exclude_areas':
-            if type(v) != 'list':
+            if type(val) is str:
+                val = [ val ]
+            elif type(val) is not list:
                 config_error(parm, val, config_section, 'must be a list with 4 elements')
-            if (len(v) % 4) > 0:
+            elif (len(val) % 4) > 0:
                 config_error(parm, val, config_section, 'must be a list with 4 elements per area')
             pass
         elif parm == 'attach_fullsize':

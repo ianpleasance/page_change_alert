@@ -1,10 +1,4 @@
 - Allow html and text of messages in config
-- Allow specification of an area to include
-- Allow specification of a list of areas of exclude. Can't use with above of course
-- Implement extra_headers
-
-
-
 
 
 
