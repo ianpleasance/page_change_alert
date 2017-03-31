@@ -3,7 +3,7 @@
 #
 # V 0.4 - 25/3/17
 # V 0.5 - 28/3/17
-#
+# V 0.6 - 30/3/17
 
 from ConfigParser import SafeConfigParser
 from pprint import pprint
@@ -25,6 +25,9 @@ config_parms = { 'proxy_server': '', 'proxy_username': '', 'proxy_password': '',
     'screen_width': 1280, 'screen_height': 1024,
     'http_username': '', 'http_password': '', 'compare_fuzz': 0, 'diff_threshold': 0, 'diff_highlight': '', 'diff_lowlight': '',
     'thumbnail_width': 600, 'email_from': '', 'email_to': '', 'email_subject': '', 'attach_fullsize': True,
+    'email_text': 'A %p% change has been detected in site %s (%u).\n\nThe current, previous, and difference images are attached.',
+    'email_html': 'A <strong>%p%</strong> change has been detected in site <strong>%s</strong> (%u).<br /><br />Thumbnails of the current, previous, and difference images are shown below',
+    'email_html_attach': ' - and the full images are attached.',
     'include_area': [], 'exclude_areas': []}
 
 def log(log_ln):
@@ -243,6 +246,7 @@ def run_section(section):
             if (config[section]['attach_fullsize']):
                 html = html + " - and the full images are attached."
             html = html + "<br /><br /><strong>Current image</strong><br /><img src=\"cid:imgcurr\"><br /><br /><strong>Previous image</strong><br /><img src=\"cid:imgprev\"><br /><br /><strong>Difference</strong><br /><img src=\"cid:imgdelta\"><br />"
+            html = html + '<br /><br />'
 
             text = text.replace('%s', section)
             text = text.replace('%u', config[section]['url'])
@@ -267,11 +271,12 @@ def run_section(section):
                 msgImage['Content-Disposition'] = 'filename="%s"' % (file)
                 msg.attach(msgImage)
 
-            for file in [ section+'.png', section+'-previous.png', section+'-delta.png' ]:
-                with open(file, 'rb') as fp:
-                    img = MIMEImage(fp.read())
-                img['Content-Disposition'] = 'attachment; filename="%s"' % (file)
-                msg.attach(img)
+            if (config[section]['attach_fullsize']):
+                for file in [ section+'.png', section+'-previous.png', section+'-delta.png' ]:
+                    with open(file, 'rb') as fp:
+                        img = MIMEImage(fp.read())
+                    img['Content-Disposition'] = 'attachment; filename="%s"' % (file)
+                    msg.attach(img)
 
 # Send the email via our own SMTP server.
             s = smtplib.SMTP('localhost')
@@ -284,11 +289,7 @@ def run_section(section):
 # Start
 #
 
-# Apply standard defaults just in case there is no 'defaults' section in the config file
-config = {} 
-config['defaults'] = {}
-for (k, v) in config_parms.items():
-    config['defaults'][k] = v
+config = {}
 
 # Parse configuration
 config_parser = SafeConfigParser()
@@ -308,12 +309,21 @@ for config_section in config_sections:
             v = v.strip()
         config[config_section][k] = v
 
+# Apply standard defaults just in case there is no 'defaults' section in the config file
+if 'defaults' not in config:
+    config['defaults'] = {}
+for (k, v) in config_parms.items():
+    if k not in config['defaults']:
+        config['defaults'][k] = v
+
 # Apply defaults to all sections
 if 'defaults' in config.keys():
     for config_section in config_sections:
-        if config_section != 'defaults':
-            for key in config_parms:
-                if key not in config[config_section].keys():
+        if config_section == 'defaults':
+            continue
+        for key in config_parms:
+            if key not in config[config_section].keys():
+                if key in config['defaults']:
                     config[config_section][key] = config['defaults'][key]
 
 # Validate each section
