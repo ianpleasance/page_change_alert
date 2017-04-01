@@ -9,14 +9,13 @@ from ConfigParser import SafeConfigParser
 from pprint import pprint
 import ast
 import re
-import sys, os, subprocess
+import sys, os, subprocess, shutil
 import time
 
 from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText  # Added
+from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
 import smtplib
-import shutil
 
 config_file = 'url_diff.ini'
 log_file = 'url_diff.log'
@@ -38,13 +37,20 @@ def log(log_ln):
     log_f.flush()
     os.fsync(log_f.fileno())
 
+def cmd_log_exec(cmd, cmd_ln):
+    log("Executing %s: %s", (cmd, cmd_ln))
+def cmd_log_out(cmd, cmd_out):
+    log("%s: %s", (cmd, cmd_out))
+def cmd_log_rc(cmd, cmd_rc):
+    log("Return code %s from %s", (cmd_rc, cmd))
+
 def abort(err_ln):
     print(err_ln)
     sys.exit(2)
 
 def config_error(parm, val, config_section, err_text):
     log("Error in configuration file section %s - the value '%s' for '%s' %s" % (config_section, val, parm, err_text))
-    sys.exit(2)
+    sys.exit(1)
 
 def run_section(section):
     log_file = 'url_diff.log'
@@ -76,22 +82,19 @@ def run_section(section):
     cmd = cmd + section + '.png '
     cmd = cmd + str(config[section]['screen_width']) + ' '
     cmd = cmd + str(config[section]['screen_height']) + ' '
-#   if config[section]['user_agent'] != '':
     cmd = cmd + "'" + config[section]['user_agent'] + "' "
-#   if config[section]['http_username'] != '':
     cmd = cmd + "'" + config[section]['http_username'] + "' "
-#   if config[section]['http_password'] != '':
     cmd = cmd + "'" + config[section]['http_password'] + "' "
     cmd = cmd + "'" + ','.join(config[section]['extra_headers']) + "'"
 
     log("Executing phantomjs: %s" % (cmd))
     proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    remainder = proc.communicate()[0]
-    remainder_rc = proc.returncode
-    log("Return code %s" % (remainder_rc))
-    for remainder_ln in remainder.split("\n"):
-        remainder_ln = remainder_ln.rstrip('\r\n')
-        log("Output: %s" % (remainder_ln))
+    cmd = proc.communicate()[0]
+    cmd_rc = proc.returncode
+    log("Return code %s" % (cmd_rc))
+    for cmd_ln in cmd.split("\n"):
+        cmd_ln = cmd_ln.rstrip('\r\n')
+        log("Output: %s" % (cmd_ln))
 
     if not os.path.isfile(section + '-previous.png'):
         log("This is the first run for this section, so not doing comparison")
@@ -104,14 +107,14 @@ def run_section(section):
         cmd = "convert %s.png -crop %sx%s+%s+%s %s-compare.png" % (section, i[0], i[1], i[2], i[3], section)
         log(cmd)
         proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        remainder = proc.communicate()[0]
-        remainder_rc = proc.returncode
+        cmd = proc.communicate()[0]
+        cmd_rc = proc.returncode
         time.sleep(3)
         cmd = "convert %s-previous.png -crop %sx%s+%s+%s %s-previous-compare.png" % (section, i[0], i[1], i[2], i[3], section)
         log(cmd)
         proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        remainder = proc.communicate()[0]
-        remainder_rc = proc.returncode
+        cmd = proc.communicate()[0]
+        cmd_rc = proc.returncode
         time.sleep(3)
     elif (len(config[section]['exclude_areas']) != 0):
         # Exclude areas
@@ -124,14 +127,14 @@ def run_section(section):
         cmd = "convert %s.png -fill %s %s %s-compare.png" % (section, fill_colour, draws, section)
         log(cmd)
         proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        remainder = proc.communicate()[0]
-        remainder_rc = proc.returncode
+        cmd = proc.communicate()[0]
+        cmd_rc = proc.returncode
         time.sleep(3)
         cmd = "convert %s-previous.png -fill %s %s %s-previous-compare.png" % (section, fill_colour, draws, section)
         log(cmd)
         proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        remainder = proc.communicate()[0]
-        remainder_rc = proc.returncode
+        cmd = proc.communicate()[0]
+        cmd_rc = proc.returncode
         time.sleep(3)
     else:
         # Just make a copy
@@ -151,31 +154,31 @@ def run_section(section):
         cmd = cmd + "%s-compare.png %s-previous-compare.png %s-delta.png" % (section, section, section)
         log("Executing compare: %s" % (cmd))
         proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        remainder = proc.communicate()[0]
-        remainder_rc = proc.returncode
-        log("Return code %s" % (remainder_rc))
+        cmd = proc.communicate()[0]
+        cmd_rc = proc.returncode
+        log("Return code %s" % (cmd_rc))
         percentage_difference = -1
         pixel_difference = -1
         curr_w = -1
         curr_h = -1 
         prev_w = -1
         prev_h = -1
-        for remainder_ln in remainder.split("\n"):
-            remainder_ln = remainder_ln.rstrip('\r\n')
-            log("Output: %s" % (remainder_ln))
-#           if remainder_ln.isdigit():
-#               percentage_difference = remainder_ln
+        for cmd_ln in cmd.split("\n"):
+            cmd_ln = cmd_ln.rstrip('\r\n')
+            log("Output: %s" % (cmd_ln))
+#           if cmd_ln.isdigit():
+#               percentage_difference = cmd_ln
 #bbc.png PNG 1280x3000 1280x3000+0+0 8-bit DirectClass 1.963MB 0.110u 0:00.120
-            match = re.search(section+'-compare\.png PNG ([0-9]*)x([0-9]*) ', remainder_ln)
+            match = re.search(section+'-compare\.png PNG ([0-9]*)x([0-9]*) ', cmd_ln)
             if match:
                 curr_w = int(match.group(1))
                 curr_h = int(match.group(2))
-            match = re.search(section+'-previous-compare\.png PNG ([0-9]*)x([0-9]*) ', remainder_ln)
+            match = re.search(section+'-previous-compare\.png PNG ([0-9]*)x([0-9]*) ', cmd_ln)
             if match:
                 prev_w = int(match.group(1))
                 prev_h = int(match.group(2))
 # all: 967
-            match = re.search('all: ([0-9]*)', remainder_ln)
+            match = re.search('all: ([0-9]*)', cmd_ln)
             if match:
                 pixel_difference = int(match.group(1))
         if (curr_w == -1):
@@ -202,20 +205,20 @@ def run_section(section):
             cmd = "convert %s.png -resize %s %s-thumbnail.png" % (section, config[section]['thumbnail_width'], section)
             log(cmd)
             proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            remainder = proc.communicate()[0]
-            remainder_rc = proc.returncode
+            cmd = proc.communicate()[0]
+            cmd_rc = proc.returncode
             time.sleep(3)
             cmd = "convert %s-previous.png -resize %s %s-previous-thumbnail.png" % (section, config[section]['thumbnail_width'], section)
             log(cmd)
             proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            remainder = proc.communicate()[0]
-            remainder_rc = proc.returncode
+            cmd = proc.communicate()[0]
+            cmd_rc = proc.returncode
             time.sleep(3)
             cmd = "convert %s-delta.png -resize %s %s-delta-thumbnail.png" % (section, config[section]['thumbnail_width'], section)
             log(cmd)
             proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            remainder = proc.communicate()[0]
-            remainder_rc = proc.returncode
+            cmd = proc.communicate()[0]
+            cmd_rc = proc.returncode
             time.sleep(3)
 
             if config[section]['email_to'] == '':
