@@ -99,3 +99,14 @@ ENV/
 
 # mypy
 .mypy_cache/
+.gitignore
+*.png
+bkp
+bkp/*
+jquery-select-areas
+jquery-select-areas/*
+url_diff.cookies
+url_diff.log
+saved/
+work_files/
+url_diff.py.save1
