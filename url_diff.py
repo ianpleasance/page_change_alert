@@ -83,6 +83,10 @@ def config_error(parm, val, config_section, err_text):
 def parse_config(config_file):
     global config
     global config_sections
+
+    if not os.path.isfile(config_file):
+       abort("Cannot open config file %s" % (config_file))
+
     config_parser = SafeConfigParser()
     config_parser.read(config_file)
     config_sections = config_parser.sections()
@@ -233,9 +237,9 @@ def run_section(section):
 
     log("Processing section %s" % (section))
 
-    if os.path.isfile(section + '.png'):
-        log("Renaming %s.png %s-previous.png" % (section, section))
-        os.rename(section + '.png', section + '-previous.png')
+    if os.path.isfile(config[section]['snapshot_dir']+'/'+section + '.png'):
+        log("Renaming %s/%s.png %s/%s-previous.png" % (config[section]['snapshot_dir'], section, config[section]['snapshot_dir'], section))
+        os.rename(config[section]['snapshot_dir']+'/'+section + '.png', config[section]['snapshot_dir']+'/'+section + '-previous.png')
 
 # Ensure that snapshot directory exists
     if not os.path.exists(config[section]['snapshot_dir']):
@@ -496,6 +500,11 @@ parser.add_argument('--config', '-c', type=str, help='Config file')
 parser.add_argument('--log', '-l', type=str, help='Log file')
 parser.add_argument('--debug', '-d', type=int, help='Debug level')
 args = parser.parse_args()
+
+if args.config:
+    config_file = args.config
+if args.log:
+    log_file = args.log
 
 run_status("Executing with config file %s and logging to %s" % (config_file, log_file))
 
