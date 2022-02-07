@@ -12,6 +12,7 @@ import re
 import sys, os, subprocess, shutil
 import time
 import argparse
+import datetime
 
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -27,7 +28,8 @@ config_parms = { 'proxy_server': '', 'proxy_username': '', 'proxy_password': '',
     'email_html': 'A <strong>%p%</strong> change has been detected in site <strong>%s</strong> (%u).<br /><br />Thumbnails of the current, previous, and difference images are shown below',
     'email_html_attach': ' - and the full images are attached.',
     'include_area': [], 'exclude_areas': [],
-    'phantomjs_timeout': 30, 'snapshot_dir': 'snapshots' }
+    'phantomjs_timeout': 30, 'phantomjs_bin': 'phantomjs', 'snapshot_dir': 'snapshots' ,
+    'use_chrome': False, 'chrome_bin': 'chrome', 'frequency': 3600 }
 
 #
 # Log a status message
@@ -102,6 +104,7 @@ def parse_config(config_file):
                 if v[-1] in [ '"', "'" ]:
                     v = v[:-1]
                 v = v.strip()
+                v = v.replace('\\', '%')
             config[config_section][k] = v
 
 #
@@ -225,6 +228,23 @@ def validate_section(section):
                 config[section][parm] = int(val)
             else:
                 config_error(parm, val, section, 'must be a positive integer')
+        elif parm == 'phantomjs_bin':
+            config[section][parm] = val
+        elif parm == 'use_chrome':
+            if val in [ '1', 'True', 'true', 'TRUE' ]:
+               config[section][parm] = True
+            elif val in [ '0', 'False', 'false', 'FALSE' ]:
+               config[section][parm] = False
+            else:
+               config_error(parm, val, section, 'must be "true" or "false"')
+        elif parm == 'chrome_bin':
+            config[section][parm] = val
+        elif parm == 'frequency':
+            if val.isdigit():
+                config[section][parm] = int(val)
+            else:
+                config_error(parm, val, section, 'must be a positive integer')
+
 
 #
 # Process a config section - this needs to be further split out into. Grab screenshot, process inc/exc, compare, extract, email
@@ -233,6 +253,20 @@ def validate_section(section):
 def run_section(section):
     if config[section]['url'] == '':
         log("Ignoring section %s as it has no url defined" % (section))
+        return
+
+# There was a previous successful run 
+    last_success_file = config[section]['snapshot_dir'] + '/' + section + '-lastsuccess.txt'
+    if os.path.exists(last_success_file):
+        last_run_timestamp = os.stat(last_success_file).st_mtime
+        last_run_datetime = datetime.datetime.fromtimestamp(last_run_timestamp)
+        current_datetime = datetime.datetime.now()
+        time_difference = current_datetime - last_run_datetime
+        time_difference_secs = int(time_difference.total_seconds())
+
+# Check that the last successful run isn't early, ie below the defined section's run frequency
+    if time_difference_secs < config[section]['frequency']:
+        log("Not processing section %s as it was processed %s seconds ago which is below the defined frequency of %s seconds" % (section, time_difference_secs, config[section]['frequency']))
         return
 
     log("Processing section %s" % (section))
@@ -249,34 +283,57 @@ def run_section(section):
             log("Ignoring section %s as the snapshot directory %s cannot be created" % (section, config[section]['snapshot_dir']))
             return
 
+# Note that we are attempting a run
+    run_file = config[section]['snapshot_dir'] + '/' + section + '-lastrun.txt'
+    with open(run_file, 'w') as f:
+        f.write(' ')
+ 
 # Grab screen
-    cmd = "timeout " + str(config[section]['phantomjs_timeout']) +"s phantomjs "
-    if config[section]['ssl_protocol'] != '':
-        cmd = cmd + '--ssl-protocol=' + config[section]['ssl_protocol'] + ' '
-    if config[section]['proxy_server'] != '':
-        cmd = cmd + '--proxy=' + config[section]['proxy_server'] + ' '
-    if config[section]['proxy_username'] != '' and config[section]['proxy_password'] != '':
-        cmd = cmd + '--proxy-auth=' + config[section]['proxy_username'] + ':' + config[section]['proxy_password'] + ' '
-    if config[section]['ignore_ssl_errors']:
-        cmd = cmd + '--ignore-ssl-errors=true '
-    if config[section]['cookies_file'] != '':
-        cmd = cmd + '--cookies-file=' + config[section]['cookies_file'] + ' '
-    cmd = cmd + 'screenshot.js '
-    cmd = cmd + "'" + config[section]['url'] + "' "
-    cmd = cmd + config[section]['snapshot_dir'] + '/' + section + '.png '
-    cmd = cmd + str(config[section]['screen_width']) + ' '
-    cmd = cmd + str(config[section]['screen_height']) + ' '
-    cmd = cmd + "'" + config[section]['user_agent'] + "' "
-    cmd = cmd + "'" + config[section]['http_username'] + "' "
-    cmd = cmd + "'" + config[section]['http_password'] + "' "
-    cmd = cmd + "'" + ','.join(config[section]['extra_headers']) + "'"
+    if (config[section]['use_chrome']):
+#./chrome --headless --window-size=1280,9000 --screenshot="/tmp/blah.png" 'https://dice.fm/search?query=rough%20trade%20east'
+        cmd = "timeout " + str(config[section]['phantomjs_timeout']) +"s " + str(config[section]['chrome_bin'])
+        cmd = cmd + " --headless --window-size=" + str(config[section]['screen_width']) + ',' + str(config[section]['screen_height']) + ' '
+        cmd = cmd + " --screenshot='" + config[section]['snapshot_dir'] + '/' + section + ".png' "
+        cmd = cmd + "'" + config[section]['url'] + "'"
 
-    cmd_log("phantomjs", cmd)
+        cmd_log("chrome", cmd)
+    else:
+        cmd = "timeout " + str(config[section]['phantomjs_timeout']) +"s " + str(config[section]['phantomjs_bin']) + " "
+        if config[section]['ssl_protocol'] != '':
+            cmd = cmd + '--ssl-protocol=' + config[section]['ssl_protocol'] + ' '
+        if config[section]['proxy_server'] != '':
+            cmd = cmd + '--proxy=' + config[section]['proxy_server'] + ' '
+        if config[section]['proxy_username'] != '' and config[section]['proxy_password'] != '':
+            cmd = cmd + '--proxy-auth=' + config[section]['proxy_username'] + ':' + config[section]['proxy_password'] + ' '
+        if config[section]['ignore_ssl_errors']:
+            cmd = cmd + '--ignore-ssl-errors=true '
+        if config[section]['cookies_file'] != '':
+            cmd = cmd + '--cookies-file=' + config[section]['cookies_file'] + ' '
+        cmd = cmd + 'screenshot.js '
+        cmd = cmd + "'" + config[section]['url'] + "' "
+        cmd = cmd + config[section]['snapshot_dir'] + '/' + section + '.png '
+        cmd = cmd + str(config[section]['screen_width']) + ' '
+        cmd = cmd + str(config[section]['screen_height']) + ' '
+        cmd = cmd + "'" + config[section]['user_agent'] + "' "
+        cmd = cmd + "'" + config[section]['http_username'] + "' "
+        cmd = cmd + "'" + config[section]['http_password'] + "' "
+        cmd = cmd + "'" + ','.join(config[section]['extra_headers']) + "'"
+
+        cmd_log("phantomjs", cmd)
+
     proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     cmd_out = proc.communicate()[0]
     cmd_rc = proc.returncode
-    cmd_log_rc("phantomjs", cmd_rc)
-    cmd_log_out("phantomjs", cmd_out)
+    if config[section]['use_chrome']:
+        cmd_log_rc("chrome", cmd_rc)
+        cmd_log_out("chrome", cmd_out)
+    else:
+        cmd_log_rc("phantomjs", cmd_rc)
+        cmd_log_out("phantomjs", cmd_out)
+
+    if cmd_rc != 0:
+        log("Ignoring section %s non-zero return code of %s from phantomjs" % (section, cmd_rc))
+        return
 
     if not os.path.isfile(config[section]['snapshot_dir'] + '/' + section + '-previous.png'):
         log("This is the first run for this section, so not doing comparison")
@@ -391,6 +448,11 @@ def run_section(section):
         log("Current image = %s x %s, previous image = %s x %s" % (curr_w, curr_h, prev_w, prev_h))
         log("Pixel/Percentage difference: %s %s" % (pixel_difference, percentage_difference))
 
+# Note that we completed a run
+        run_file = config[section]['snapshot_dir'] + '/' + section + '-lastsuccess.txt'
+        with open(run_file, 'w') as f:  
+            f.write(' ')
+
 # Email differences
         if percentage_difference > int(config[section]['diff_threshold']):
             log("Thumbnailing")
@@ -483,8 +545,13 @@ def run_section(section):
             s = smtplib.SMTP('localhost')
             s.sendmail(mail_from, mail_to, msg.as_string())
             s.quit()
-            return None
 
+# Note that we detected a change
+            run_file = config[section]['snapshot_dir'] + '/' + section + '-lastchange,txt'
+            with open(run_file, 'w') as f:  
+                f.write(' ')
+
+            return None
 
 #
 # Start

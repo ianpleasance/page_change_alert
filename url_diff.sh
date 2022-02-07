@@ -6,7 +6,7 @@ while [ "$fin" -eq 0 ]
     echo "Running"
     ./url_diff.py
     DAT=`date '+%d%m%Y-%H%M'`
-    tar cvzf saved/${DAT}.tar.gz *.png >/dev/null 2>&1
+#   tar cvzf saved/${DAT}.tar.gz snapshots/*.png >/dev/null 2>&1
     echo "Sleeping"
-    sleep 3h
+    sleep 15m
   done
