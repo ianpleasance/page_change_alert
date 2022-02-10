@@ -353,19 +353,21 @@ def run_section(section):
 # the actual search contents have been rendered asynchronously. So this checks for a 700x700 black square
 # in the search results - indicating that this has happened and that the run should be ignored and classed
 # as a failure
-    if section.startswith("dice"):
-        tmp_square = "/tmp/square.png"
-        black_square = "black700x700.png"
-        cmd = "convert snapshots/"+section+".png -crop 700x700+100+300 "+tmp_square
-        cmd_log("hack convert", cmd)
+    if config[section]['fail_on_match']:
+        tmp_match = "/tmp/square.png"
+        match_file = config[section]['fail_on_match_image']
+        match_area = config[section]['fail_on_match_area']
+#       cmd = "convert snapshots/"+section+".png -crop 700x700+100+300 "+tmp_match
+        cmd = "convert snapshots/"+section+".png -crop "+str(match_area[2])+'x'+str(match_area[3])+'+'+str(match_area[0])+'+'+str(match_area[1])+" "+tmp_match
+        cmd_log("fail_on_match convert", cmd)
         proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         cmd_out = proc.communicate()[0]
         cmd_rc = proc.returncode
-        size_square = os.path.getsize(tmp_square)
-        size_black = os.path.getsize(black_square)
-        log("* Dice search hack compare size square %s black %s *" % (size_square, size_black))
-        if size_square == size_black:
-           log("Dice search render failed, no results shown (black square matched)")
+        size_square = os.path.getsize(tmp_match)
+        size_match = os.path.getsize(match_file)
+        log("* fail_on_match compare size square %s match %s *" % (size_square, size_match))
+        if size_square == size_match:
+           log("fail_on_match conditions met, search render failed")
            return
 
     if os.path.isfile(config[section]['snapshot_dir']+'/'+section + '.png'):
