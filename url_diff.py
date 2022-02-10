@@ -21,7 +21,7 @@ from email.mime.image import MIMEImage
 import smtplib
 
 config_parms = { 'proxy_server': '', 'proxy_username': '', 'proxy_password': '', 'proxy_type': 'http',
-    'ssl_protocol': 'any', 'ignore_ssl_errors': True, 'extra_headers': [ ], 'user_agent': '', 'cookies_file': '',
+    'ssl_protocol': 'any', 'ignore_ssl_errors': 'True', 'extra_headers': [ ], 'user_agent': '', 'cookies_file': '',
     'screen_width': 1280, 'screen_height': 1024,
     'http_username': '', 'http_password': '', 'compare_fuzz': 0, 'diff_threshold': 0, 'diff_highlight': '', 'diff_lowlight': '',
     'thumbnail_width': 600, 'email_from': '', 'email_to': '', 'email_subject': '', 'attach_fullsize': True,
@@ -30,7 +30,8 @@ config_parms = { 'proxy_server': '', 'proxy_username': '', 'proxy_password': '',
     'email_html_attach': ' - and the full images are attached.',
     'include_area': [], 'exclude_areas': [],
     'phantomjs_timeout': 30, 'phantomjs_bin': 'phantomjs', 'snapshot_dir': 'snapshots' ,
-    'use_chrome': False, 'chrome_bin': 'chrome', 'frequency': 3600 }
+    'use_chrome': 'False', 'chrome_bin': 'chrome', 'frequency': 3600 ,
+    'fail_on_match': 'False', 'fail_on_match_image': '', 'fail_on_match_area': [] }
 
 #
 # Log a status message
@@ -130,7 +131,7 @@ def apply_config_defaults():
 
 #
 # Validate a config section
-#
+# This needs condensing so very much...
 
 def validate_section(section):
     for parm in config_parms:
@@ -245,6 +246,22 @@ def validate_section(section):
                 config[section][parm] = int(val)
             else:
                 config_error(parm, val, section, 'must be a positive integer')
+        elif parm == 'fail_on_match':
+            if val in [ '1', 'True', 'true', 'TRUE' ]:
+               config[section][parm] = True
+            elif val in [ '0', 'False', 'false', 'FALSE' ]:
+               config[section][parm] = False
+            else:
+               config_error(parm, val, section, 'must be "true" or "false"')
+        elif parm == 'fail_on_match_image':
+            config[section][parm] = val
+        elif parm == 'fail_on_match_area':
+            if type(val) is str:
+                val = [ val ]
+            elif type(val) is not list:
+                config_error(parm, val, section, 'must be a list with 4 elements')
+            elif (len(val) % 4) > 0:
+                config_error(parm, val, section, 'must be a list with 4 elements per area')
 
 
 #
