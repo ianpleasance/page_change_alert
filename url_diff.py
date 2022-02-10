@@ -4,6 +4,7 @@
 # V 0.4 - 25/3/17
 # V 0.5 - 28/3/17
 # V 0.6 - 30/3/17
+# V 0.7 - 08/02/22
 
 from ConfigParser import SafeConfigParser
 from pprint import pprint
@@ -255,6 +256,14 @@ def run_section(section):
         log("Ignoring section %s as it has no url defined" % (section))
         return
 
+# Ensure that snapshot directory exists
+    if not os.path.exists(config[section]['snapshot_dir']):
+        try:
+            os.makedirs(config[section]['snapshot_dir'])
+        except:
+            log("Ignoring section %s as the snapshot directory %s cannot be created" % (section, config[section]['snapshot_dir']))
+            return
+
 # There was a previous successful run 
     last_success_file = config[section]['snapshot_dir'] + '/' + section + '-lastsuccess.txt'
     if os.path.exists(last_success_file):
@@ -265,35 +274,23 @@ def run_section(section):
         time_difference_secs = int(time_difference.total_seconds())
 
 # Check that the last successful run isn't early, ie below the defined section's run frequency
-    if time_difference_secs < config[section]['frequency']:
-        log("Not processing section %s as it was processed %s seconds ago which is below the defined frequency of %s seconds" % (section, time_difference_secs, config[section]['frequency']))
-        return
+        if time_difference_secs < config[section]['frequency']:
+            log("Not processing section %s as it was processed %s seconds ago which is below the defined frequency of %s seconds" % (section, time_difference_secs, config[section]['frequency']))
+            return
 
     log("Processing section %s" % (section))
-
-    if os.path.isfile(config[section]['snapshot_dir']+'/'+section + '.png'):
-        log("Renaming %s/%s.png %s/%s-previous.png" % (config[section]['snapshot_dir'], section, config[section]['snapshot_dir'], section))
-        os.rename(config[section]['snapshot_dir']+'/'+section + '.png', config[section]['snapshot_dir']+'/'+section + '-previous.png')
-
-# Ensure that snapshot directory exists
-    if not os.path.exists(config[section]['snapshot_dir']):
-        try:
-            os.makedirs(config[section]['snapshot_dir'])
-        except:
-            log("Ignoring section %s as the snapshot directory %s cannot be created" % (section, config[section]['snapshot_dir']))
-            return
 
 # Note that we are attempting a run
     run_file = config[section]['snapshot_dir'] + '/' + section + '-lastrun.txt'
     with open(run_file, 'w') as f:
         f.write(' ')
  
-# Grab screen
+# Grab the page
     if (config[section]['use_chrome']):
 #./chrome --headless --window-size=1280,9000 --screenshot="/tmp/blah.png" 'https://dice.fm/search?query=rough%20trade%20east'
         cmd = "timeout " + str(config[section]['phantomjs_timeout']) +"s " + str(config[section]['chrome_bin'])
         cmd = cmd + " --headless --window-size=" + str(config[section]['screen_width']) + ',' + str(config[section]['screen_height']) + ' '
-        cmd = cmd + " --screenshot='" + config[section]['snapshot_dir'] + '/' + section + ".png' "
+        cmd = cmd + " --screenshot='" + config[section]['snapshot_dir'] + "/output.png' "
         cmd = cmd + "'" + config[section]['url'] + "'"
 
         cmd_log("chrome", cmd)
@@ -311,7 +308,7 @@ def run_section(section):
             cmd = cmd + '--cookies-file=' + config[section]['cookies_file'] + ' '
         cmd = cmd + 'screenshot.js '
         cmd = cmd + "'" + config[section]['url'] + "' "
-        cmd = cmd + config[section]['snapshot_dir'] + '/' + section + '.png '
+        cmd = cmd + config[section]['snapshot_dir'] + '/output.png '
         cmd = cmd + str(config[section]['screen_width']) + ' '
         cmd = cmd + str(config[section]['screen_height']) + ' '
         cmd = cmd + "'" + config[section]['user_agent'] + "' "
@@ -332,8 +329,34 @@ def run_section(section):
         cmd_log_out("phantomjs", cmd_out)
 
     if cmd_rc != 0:
-        log("Ignoring section %s non-zero return code of %s from phantomjs" % (section, cmd_rc))
+        log("Ignoring section %s non-zero return code of %s from browser" % (section, cmd_rc))
         return
+
+# Massive hack for dice failures. Sometimes the browser seems to signal page-load complete and exit before 
+# the actual search contents have been rendered asynchronously. So this checks for a 700x700 black square
+# in the search results - indicating that this has happened and that the run should be ignored and classed
+# as a failure
+    if section.startswith("dice"):
+        tmp_square = "/tmp/square.png"
+        black_square = "black700x700.png"
+        cmd = "convert snapshots/"+section+".png -crop 700x700+100+300 "+tmp_square
+        cmd_log("hack convert", cmd)
+        proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        cmd_out = proc.communicate()[0]
+        cmd_rc = proc.returncode
+        size_square = os.path.getsize(tmp_square)
+        size_black = os.path.getsize(black_square)
+        log("* Dice search hack compare size square %s black %s *" % (size_square, size_black))
+        if size_square == size_black:
+           log("Dice search render failed, no results shown (black square matched)")
+           return
+
+    if os.path.isfile(config[section]['snapshot_dir']+'/'+section + '.png'):
+        log("Renaming %s/%s.png %s/%s-previous.png" % (config[section]['snapshot_dir'], section, config[section]['snapshot_dir'], section))
+        os.rename(config[section]['snapshot_dir']+'/'+section + '.png', config[section]['snapshot_dir']+'/'+section + '-previous.png')
+
+    log("Renaming %s/output.png %s/%s.png" % (config[section]['snapshot_dir'], config[section]['snapshot_dir'], section))
+    os.rename(config[section]['snapshot_dir']+'/output.png', config[section]['snapshot_dir']+'/'+section + '.png')
 
     if not os.path.isfile(config[section]['snapshot_dir'] + '/' + section + '-previous.png'):
         log("This is the first run for this section, so not doing comparison")
@@ -487,6 +510,8 @@ def run_section(section):
 
             log("Emailing differences")
 
+            curr_time = time.strftime("%d/%m/%Y %H:%M:%S")
+
             mail_to = config[section]['email_from']
             mail_from = config[section]['email_to']
             mail_subject = config[section]['email_subject']
@@ -494,6 +519,7 @@ def run_section(section):
             mail_subject = mail_subject.replace('%s', section)
             mail_subject = mail_subject.replace('%u', config[section]['url'])
             mail_subject = mail_subject.replace('%p', str(percentage_difference))
+            mail_subject = mail_subject.replace('%d', curr_time)
 
 # Create the container (outer) email message.
             msg = MIMEMultipart()
@@ -504,27 +530,31 @@ def run_section(section):
             msg.preamble = 'This is a multi-part message in MIME format.\n'
             msg.epilogue = ''
 
-            text = "A %p% change has been detected in site %s (%u).\n\nThe current, previous, and difference images are attached."
-            html = "A <strong>%p%</strong> change has been detected in site <strong>%s</strong> (%u).<br /><br />Thumbnails of the current, previous, and difference images are shown below"
+            text = "A %p% change has been detected in site %s (%u) on %d.\n\nThe difference, current and previous images are attached."
+            html = 'A <strong>%p%</strong> change has been detected in site <strong>%s</strong> (<a href="%u">%u</a>) on %d.<br /><br />Thumbnails of the current, previous, and difference images are shown below.'
             if (config[section]['attach_fullsize']):
                 html = html + " - and the full images are attached."
-            html = html + "<br /><br /><strong>Current image</strong><br /><img src=\"cid:imgcurr\"><br /><br /><strong>Previous image</strong><br /><img src=\"cid:imgprev\"><br /><br /><strong>Difference</strong><br /><img src=\"cid:imgdelta\"><br />"
+            html = html + "<br /><br /><strong>Difference</strong><br /><img src=\"cid:imgdelta\"><br /><strong>Current image</strong><br /><img src=\"cid:imgcurr\"><br /><br /><strong>Previous image</strong><br /><img src=\"cid:imgprev\"><br /><br />"
             html = html + '<br /><br />'
 
             text = text.replace('%s', section)
             text = text.replace('%u', config[section]['url'])
             text = text.replace('%p', str(percentage_difference))
+            text = text.replace('%d', curr_time)
             html = html.replace('%s', section)
             html = html.replace('%u', config[section]['url'])
             html = html.replace('%p', str(percentage_difference))
+            html = html.replace('%d', curr_time)
             
             body = MIMEMultipart('alternative')
-            body.attach(MIMEText(text))
-            body.attach(MIMEText(html, 'html'))
+            body_text = MIMEText(text, 'plain')
+            body_html = MIMEText(html, 'html')
+            body.attach(body_text)
+            body.attach(body_html)
 
             msg.attach(body)
 
-            for (name, file) in { 'imgcurr': section+'-thumbnail.png', 'imgprev': section+'-previous-thumbnail.png', 'imgdelta': section+'-delta-thumbnail.png' }.items():
+            for (name, file) in { 'imgdelta': section+'-delta-thumbnail.png', 'imgcurr': section+'-thumbnail.png', 'imgprev': section+'-previous-thumbnail.png' }.items():
                 fp = open(config[section]['snapshot_dir'] + '/' + file, 'rb')
                 msgImage = MIMEImage(fp.read())
                 fp.close()
@@ -535,7 +565,7 @@ def run_section(section):
                 msg.attach(msgImage)
 
             if (config[section]['attach_fullsize']):
-                for file in [ section+'.png', section+'-previous.png', section+'-delta.png' ]:
+                for file in [ section+'-delta.png', section+'.png', section+'-previous.png' ]:
                     with open(config[section]['snapshot_dir'] + '/' + file, 'rb') as fp:
                         img = MIMEImage(fp.read())
                     img['Content-Disposition'] = 'attachment; filename="%s"' % (file)
