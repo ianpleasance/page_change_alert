@@ -358,7 +358,7 @@ def run_section(section):
         match_file = config[section]['fail_on_match_image']
         match_area = config[section]['fail_on_match_area']
 #       cmd = "convert snapshots/"+section+".png -crop 700x700+100+300 "+tmp_match
-        cmd = "convert snapshots/"+section+".png -crop "+str(match_area[2])+'x'+str(match_area[3])+'+'+str(match_area[0])+'+'+str(match_area[1])+" "+tmp_match
+        cmd = "convert "+config[section]['snapshot_dir']+"/output.png -crop "+str(match_area[2])+'x'+str(match_area[3])+'+'+str(match_area[0])+'+'+str(match_area[1])+" "+tmp_match
         cmd_log("fail_on_match convert", cmd)
         proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         cmd_out = proc.communicate()[0]
@@ -367,7 +367,7 @@ def run_section(section):
         size_match = os.path.getsize(match_file)
         log("* fail_on_match compare size square %s match %s *" % (size_square, size_match))
         if size_square == size_match:
-           log("fail_on_match conditions met, search render failed")
+           log("fail_on_match conditions met, search render failed. Aborting this run")
            return
 
     if os.path.isfile(config[section]['snapshot_dir']+'/'+section + '.png'):
